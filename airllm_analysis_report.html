@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AirLLM Codebase Deep-Dive — Key Technologies &amp; Design</title>
+<style>
+  :root{
+    --bg:#0b0f14; --bg2:#0f1520; --panel:#131b28; --panel2:#182232;
+    --ink:#dbe4f0; --dim:#8b9bb4; --faint:#5c6b82;
+    --acc:#4fd1c5; --acc2:#7c9cff; --warn:#f6c177; --bad:#ff6b6b; --good:#a3e635;
+    --line:#22304a; --code-bg:#0a0e15;
+    --mono:'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding-bottom:80px}
+  a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--code-bg);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:#a8d8ff;white-space:nowrap}
+  .layout{display:grid;grid-template-columns:250px 1fr;max-width:1280px;margin:0 auto}
+  /* header */
+  .hero{grid-column:1/-1;padding:52px 40px 36px;border-bottom:1px solid var(--line);
+    background:linear-gradient(160deg,#101a2b 0%,#0b0f14 60%),radial-gradient(1000px 400px at 75% -10%,rgba(124,156,255,.14),transparent)}
+  .hero h1{font-size:34px;letter-spacing:-.5px;font-weight:800}
+  .hero h1 .accent{color:var(--acc)}
+  .hero p.sub{color:var(--dim);margin-top:10px;max-width:860px;font-size:16px}
+  .hero .meta{margin-top:18px;color:var(--faint);font-size:13px;font-family:var(--mono)}
+  /* nav */
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:28px 18px;border-right:1px solid var(--line);font-size:13.5px}
+  nav .nav-title{font-family:var(--mono);color:var(--faint);font-size:11px;letter-spacing:2px;margin:18px 0 8px 10px;text-transform:uppercase}
+  nav a{display:block;color:var(--dim);padding:5px 10px;border-radius:6px;border-left:2px solid transparent}
+  nav a:hover{color:var(--ink);background:var(--panel);text-decoration:none}
+  nav a.num{border-left-color:var(--line)}
+  /* main */
+  main{padding:36px 44px;min-width:0}
+  section{margin-bottom:56px}
+  h2{font-size:23px;margin-bottom:6px;letter-spacing:-.3px;padding-top:12px}
+  h2 .idx{color:var(--acc);font-family:var(--mono);font-size:15px;margin-right:10px;vertical-align:2px}
+  h3{font-size:16.5px;margin:26px 0 10px;color:var(--acc2)}
+  p.lead{color:var(--dim);margin-bottom:18px;font-size:14.5px}
+  section > p {margin:10px 0;color:var(--ink)}
+  ul.b{margin:10px 0 10px 22px} ul.b li{margin:6px 0}
+  /* cards */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:20px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .card .k{font-family:var(--mono);font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:1.5px}
+  .card .v{font-size:24px;font-weight:750;margin-top:6px;color:var(--acc)}
+  .card .n{font-size:12.5px;color:var(--dim);margin-top:4px}
+  /* tables */
+  table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--faint);text-align:left}
+  th,td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  td.mono{font-family:var(--mono);font-size:12.5px;color:#a8d8ff;white-space:nowrap}
+  tr:hover td{background:rgba(124,156,255,.045)}
+  /* panels */
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 22px;margin:16px 0}
+  .panel.good{border-left:3px solid var(--good)}
+  .panel.warn{border-left:3px solid var(--warn)}
+  .panel.bad{border-left:3px solid var(--bad)}
+  .panel .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:1.5px;text-transform:uppercase;color:var(--faint)}
+  /* flow diagram */
+  .flow{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;margin:22px 0}
+  .fstep{flex:1;min-width:150px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 14px;position:relative;margin-right:34px;margin-bottom:12px}
+  .fstep:last-child{margin-right:0}
+  .fstep::after{content:'→';position:absolute;right:-27px;top:50%;transform:translateY(-50%);color:var(--acc);font-size:19px}
+  .fstep:last-child::after{content:''}
+  .fstep .fs-t{font-weight:700;font-size:13.5px;color:var(--acc)}
+  .fstep .fs-d{font-size:12px;color:var(--dim);margin-top:5px;line-height:1.5}
+  .fstep .fs-f{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px}
+  /* pipeline diagram */
+  .pipe{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:22px;margin:18px 0;font-family:var(--mono);font-size:12.5px;line-height:1.9;overflow-x:auto;color:#9fb3d1}
+  .pipe .c1{color:var(--acc)} .pipe .c2{color:var(--acc2)} .pipe .c3{color:var(--warn)} .pipe .c4{color:var(--good)} .pipe .c5{color:var(--bad)} .pipe .cm{color:#48586e}
+  /* badges */
+  .badge{display:inline-block;font-family:var(--mono);font-size:10.5px;padding:2px 9px;border-radius:20px;border:1px solid var(--line);color:var(--dim);margin:2px 4px 2px 0;background:var(--bg2)}
+  .badge.hi{color:var(--acc);border-color:#2b5f59}
+  /* footer */
+  footer{grid-column:1/-1;text-align:center;color:var(--faint);font-size:12px;font-family:var(--mono);padding:24px;border-top:1px solid var(--line)}
+  @media(max-width:960px){ .layout{display:block} nav{position:static;height:auto;border-right:none;border-bottom:1px solid var(--line)} main{padding:24px} }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<div class="hero">
+  <h1>AirLLM <span class="accent">— Codebase Deep-Dive</span></h1>
+  <p class="sub">How a ~10k-line Python library runs a <b>2.8T-parameter model on a 4GB GPU</b> — and trains a 125B one under 6GB — by treating disk as a tier of the memory hierarchy and the GPU as a one-layer-at-a-time compute scratchpad.</p>
+  <div class="meta">repo: ~/Projects/airllm · v4.0.0 · Apache-2.0 · analyzed 2026-10-12 · core package: air_llm/ (~5.5k LoC)</div>
+</div>
+
+<nav>
+  <div class="nav-title">Report</div>
+  <a href="#tl-dr">TL;DR</a>
+  <a href="#map">1 · Repository map</a>
+  <a href="#core">2 · Core architecture</a>
+  <a href="#split">3 · Checkpoint splitting</a>
+  <a href="#moe">4 · Per-expert streaming</a>
+  <a href="#mmap">5 · 102GB embedding table</a>
+  <a href="#quant">6 · Quantization paths</a>
+  <a href="#train">7 · Streamed LoRA training</a>
+  <a href="#robust">8 · Compatibility engineering</a>
+  <a href="#macos">9 · MLX / MacOS backend</a>
+  <a href="#design">10 · Design principles</a>
+  <a href="#risks">11 · Trade-offs &amp; risks</a>
+</nav>
+
+<main>
+
+<!-- ============ TLDR ============ -->
+<section id="tl-dr">
+  <h2><span class="idx">§</span>TL;DR</h2>
+  <p class="lead">AirLLM's entire premise in one sentence: <b>VRAM needed ≈ largest single streamed module + activations, not model size.</b></p>
+  <div class="cards">
+    <div class="card"><div class="k">Headline trick</div><div class="v">1 layer</div><div class="n">on GPU at a time — weights stream disk → GPU → <code>meta</code></div></div>
+    <div class="card"><div class="k">Largest model run</div><div class="v">2.8T</div><div class="n">Kimi K3 in 3.72GB VRAM (per-expert streaming, MXFP4)</div></div>
+    <div class="card"><div class="k">Biggest table</div><div class="v">~102GB</div><div class="n">Flash-Next PLE n-gram table, file-mmap'd, gathered from disk</div></div>
+    <div class="card"><div class="k">Training</div><div class="v">&lt;6GB</div><div class="n">LoRA on 125B MoE — recompute-style backward over streamed layers</div></div>
+    <div class="card"><div class="k">Speedup extras</div><div class="v">~3×</div><div class="n">optional bnb NF4/int8 weight-only compression (I/O-bound → accuracy-safe)</div></div>
+  </div>
+  <p>Three ideas do almost all the work: <b>(1)</b> a one-time offline "split" that rewrites any HF checkpoint into one safetensors file per module; <b>(2)</b> forward hooks on the meta-device model that materialize/evict each module around its execution, with a background thread prefetching the next shard; <b>(3)</b> letting <i>transformers own the forward pass</i>, so AirLLM never re-implements attention/rotary/cache logic and new architectures work day-0. Everything else — per-expert hooks, mmap embeddings, FP8/MXFP4 handling, streamed LoRA, chunked cross-entropy — is a consequence of pushing those three ideas into frontier models.</p>
+</section>
+
+<!-- ============ MAP ============ -->
+<section id="map">
+  <h2><span class="idx">1</span>Repository map</h2>
+  <p class="lead">The pip package lives in <code>air_llm/</code>; the rest is the author's training/RLHF lab for the "Anima" model family.</p>
+  <table>
+    <tr><th>Path</th><th>~LoC</th><th>Role</th></tr>
+    <tr><td class="mono">air_llm/airllm/airllm_base.py</td><td class="mono">920</td><td><b>Core:</b> meta-device model, streaming hooks, prefetch, expert streaming, quantized-load plumbing</td></tr>
+    <tr><td class="mono">air_llm/airllm/utils.py</td><td class="mono">870</td><td><b>Core:</b> checkpoint splitter, mmap n-gram table, compression, passthrough linking</td></tr>
+    <tr><td class="mono">air_llm/airllm/airllm_lora.py</td><td class="mono">562</td><td>Streamed LoRA trainer (dense + MoE), autograd recompute Function</td></tr>
+    <tr><td class="mono">air_llm/airllm/airllm_llama_mlx.py</td><td class="mono">436</td><td>Apple-Silicon MLX backend (Llama-family reimplementation)</td></tr>
+    <tr><td class="mono">air_llm/airllm/{lora_linear, chunked_ce, lora_data}.py</td><td class="mono">~500</td><td>PEFT-free LoRA injection, vocab-chunked cross-entropy, SFT dataset</td></tr>
+    <tr><td class="mono">air_llm/airllm/auto_model.py + airllm_*.py</td><td class="mono">~450</td><td>AutoModel dispatch + per-architecture overrides (mostly just module-path maps)</td></tr>
+    <tr><td class="mono">air_llm/airllm/persist/</td><td class="mono">~200</td><td>Persister abstraction: safetensors (Linux/CUDA) vs .npz (MLX/MacOS)</td></tr>
+    <tr><td class="mono">air_llm/tests/</td><td class="mono">~1.1k</td><td>Split-correctness, streaming, LoRA, automodel smoke tests</td></tr>
+    <tr><td class="mono">anima_100k/, rlhf/, training/, eval/</td><td class="mono">~3.6k</td><td>Anima 100k training (flash-llama), QLoRA DPO, finetune scripts, Elo eval</td></tr>
+  </table>
+  <p><span class="badge hi">torch ≥2.4</span><span class="badge hi">transformers 4.49–5.x</span><span class="badge">accelerate</span><span class="badge">safetensors</span><span class="badge">bitsandbytes (optional)</span><span class="badge">compressed-tensors (optional)</span><span class="badge">mlx (MacOS)</span></p>
+</section>
+
+<!-- ============ CORE ============ -->
+<section id="core">
+  <h2><span class="idx">2</span>Core architecture: hook-driven layer streaming</h2>
+  <p class="lead">airllm_base.py:58 — <code>AirLLMBaseModel</code> wraps a real transformers model and owns <i>weight logistics only</i>.</p>
+
+  <h3>2.1 The meta-device trick</h3>
+  <p>The model is instantiated under <code>accelerate.init_empty_weights(include_buffers=False)</code>, so every Parameter lives on the <b>meta device</b> — zero bytes allocated (airllm_base.py:296). Non-persistent buffers (rotary <code>inv_freq</code> etc.) <i>are</i> computed and moved to CUDA once (airllm_base.py:370). A factory-fallback chain (<code>AutoModelForImageTextToText → CausalLM → MultimodalLM → AutoModel</code>, airllm_base.py:266) plus a "does the module tree actually match our layer map?" check (airllm_base.py:251) makes one code path cover dense, MoE, and VL checkpoints.</p>
+
+  <h3>2.2 Forward hooks = the entire runtime</h3>
+  <div class="flow">
+    <div class="fstep"><div class="fs-t">pre-hook fires</div><div class="fs-d">Module is about to run; its params are on <code>meta</code></div><div class="fs-f">_pre_hook · base:879</div></div>
+    <div class="fstep"><div class="fs-t">Consume prefetch or load</div><div class="fs-d">Take the background thread's future for this idx, else read the module's safetensors shard from disk</div><div class="fs-f">base:882-886</div></div>
+    <div class="fstep"><div class="fs-t">Materialize on GPU</div><div class="fs-d"><code>set_module_tensor_to_device</code> per tensor; dtype-cast for floats, verbatim for quantized payloads</div><div class="fs-f">move_layer_to_device:599</div></div>
+    <div class="fstep"><div class="fs-t">Module computes</div><div class="fs-d">transformers' own forward — AirLLM adds nothing here</div><div class="fs-f">—</div></div>
+    <div class="fstep"><div class="fs-t">post-hook evicts</div><div class="fs-d">Params → <code>meta</code>, <code>clean_memory()</code> (gc + malloc_trim + cuda cache)</div><div class="fs-f">_post_hook:896</div></div>
+  </div>
+
+  <div class="pipe">
+<span class="cm"># one generated token, 70B model, ~80 modules:</span>
+<span class="c1">disk</span> shard_L.safetensors ──<span class="cm">(thread: prefetch L+1, pinned ≤2GB)</span>──▶ <span class="c2">CPU RAM</span>
+      └────────────▶ <span class="c4">GPU</span> [layer L runs < 100ms] ──▶ params→<span class="c5">meta</span> ──▶ <span class="c1">disk</span> shard_L+1 …
+<span class="cm"># steady state: VRAM = 1 layer (~2-4GB for 70B bf16) + activations + KV cache</span>
+  </div>
+
+  <h3>2.3 Prefetch pipeline</h3>
+  <ul class="b">
+    <li>Single-worker <code>ThreadPoolExecutor</code> submits <code>_load_streamed_layer(idx+1)</code> while idx computes (airllm_base.py:890-894) — ~10% end-to-end win, the disk read overlaps GPU compute.</li>
+    <li>Pinned (page-locked) host memory only for shards ≤ <code>max_pinned_layer_bytes = 2GB</code> (airllm_base.py:75): two prefetched 17GB MoE layers in flight would otherwise lock ~34GB of RAM that can never be paged out — a deliberate cap with graceful fallback to pageable on <code>RuntimeError</code>.</li>
+    <li>Tied embeddings special case: <code>lm_head</code> shares the embed weight, so the embed stays <i>resident</i> and only decoder layers + norm stream (airllm_base.py:756-764).</li>
+  </ul>
+
+  <h3>2.4 Why this design wins</h3>
+  <div class="panel good"><div class="tag">Design payoff</div>
+  <p style="margin-top:6px">Because transformers drives the forward, AirLLM carries <b>zero per-architecture math code</b> — no attention kernels, no rope, no KV-cache bookkeeping. A model released today works as soon as <code>transformers</code> supports it; the only per-model knowledge is a module-path map (<code>layer_names_dict</code>). Legacy remote-code architectures (ChatGLM, QWen, Baichuan, InternLM) and two frontier ones (Kimi K3, Qwen4Exp) are the only subclasses — each is essentially just a dict of paths (see airllm_kimi_k3.py:18, 32 lines total).</p></div>
+</section>
+
+<!-- ============ SPLIT ============ -->
+<section id="split">
+  <h2><span class="idx">3</span>Checkpoint splitting: the offline half</h2>
+  <p class="lead">utils.py:528 <code>split_and_save_layers()</code> — a one-time, resumable ETL from "whatever HF ships" to "one safetensors file per streamed module".</p>
+  <ul class="b">
+    <li><b>Format-agnostic input:</b> indexed safetensors / single-file safetensors / pytorch .bin(+index) all normalized into a <code>weight_map</code> (utils.py:549-572); shards are downloaded <i>on demand</i> via <code>snapshot_download(allow_patterns=…)</code> so a 360GB repo never needs all shards resident at once.</li>
+    <li><b>Longest-prefix ownership:</b> each tensor key is assigned to its owning module via <code>layer_owner()</code> (utils.py:400) — critical so a nested PLE table under a decoder layer isn't swallowed into that layer's shard and later dragged onto the GPU (utils.py:764-767).</li>
+    <li><b>Crash-safe resume:</b> each output gets a <code>&lt;name&gt;.safetensors.done</code> marker; re-runs re-check all markers and only re-save missing/corrupt ones (persist/safetensor_model_persister.py:20).</li>
+    <li><b>Passthrough hard-linking:</b> if a checkpoint already ships exactly one module per shard (Kimi K3: one ~17GB shard per decoder layer), the splitter <b>hard-links</b> instead of rewriting — avoiding duplicating 1.5TB+ and hours of I/O for byte-identical output (utils.py:633-654, 692-709). Degrades gracefully: hardlink → symlink → copy (utils.py:501).</li>
+    <li><b>Shard-order correctness:</b> modules are stably sorted by the last shard they touch, so a vision tower interleaved in the shard sequence can't silently truncate another module's tensor set (utils.py:600-612); layers spanning multiple shards (fp8 weight + scale pairs) load <i>every</i> shard up to their max (utils.py:713-719).</li>
+    <li><b>Space management:</b> pre-flight disk check with compression-aware estimates (utils.py:447); <code>delete_original=True</code> streams deletions of consumed originals to halve peak disk.</li>
+  </ul>
+</section>
+
+<!-- ============ MOE ============ -->
+<section id="moe">
+  <h2><span class="idx">4</span>Per-expert streaming for MoE</h2>
+  <p class="lead">airllm_base.py:778 <code>_setup_expert_streaming()</code> — the trick that takes Kimi K3 from "impossible" to 3.72GB.</p>
+  <p>A sparse MoE layer holds hundreds of experts but routes each token to a handful (K3: 896 experts, 16 active). Materializing the whole layer is ~55GB expanded; a token touches ~1GB. Because the router calls each <i>selected</i> expert as its own module (and skips the rest), a forward hook <b>per expert</b> loads exactly the experts that actually run:</p>
+  <ul class="b">
+    <li>Enabled simply by an <code>expert_prefix</code> entry in the layer map (airllm_kimi_k3.py:24) + safetensors' ability to <b>seek to individual tensors</b>: <code>load_layer_subset()</code> (utils.py:415) reads one expert's few MB out of a ~17GB layer file without touching the rest.</li>
+    <li>Layer-level hooks then load only the <i>non-expert</i> keys of the layer (attention, norms, router) via <code>_non_expert_keys</code> (airllm_base.py:874).</li>
+    <li>Eviction bookkeeping: since experts manage their own lifetime, the layer post-hook releases only the tensors <i>it</i> placed — never <code>module.to('meta')</code>, which would evict experts/cpu-resident children too (airllm_base.py:896-907).</li>
+    <li>Contrast — Qwen4Exp ships experts as <b>3D packed tensors</b> on one module, not a ModuleList, so Kimi-style per-expert hooks don't apply; a whole MoE layer (a few GB bf16) streams instead (airllm_qwen4_exp.py:39-41). Honest architectural note in the docstring.</li>
+  </ul>
+</section>
+
+<!-- ============ MMAP ============ -->
+<section id="mmap">
+  <h2><span class="idx">5</span>The 102GB embedding table that lives on disk</h2>
+  <p class="lead">Flash-Next's ~51B-param PLE n-gram table — the most extreme component in the repo — handled by three cooperating hacks in utils.py.</p>
+  <table>
+    <tr><th>Problem</th><th>Mechanism</th><th>Where</th></tr>
+    <tr><td>Merely <i>constructing</i> <code>nn.Embedding(320M, 160)</code> allocates ~191GB of empty fp32 on CPU before accelerate moves it to meta</td><td><code>_force_meta_embeddings()</code> — scoped monkeypatch of <code>nn.Embedding.__init__</code> forcing <code>device=meta</code></td><td class="mono">utils.py:330</td></tr>
+    <tr><td>102GB of bf16 doesn't fit in a 64GB host, and must never reach the GPU</td><td>Splitter streams shards into a raw <b>file-backed mmap</b> (<code>torch.UntypedStorage.from_file</code>, shared) + sidecar JSON; lookup gathers rows <i>from disk via the page cache</i></td><td class="mono">utils.py:223, 296</td></tr>
+    <tr><td>Parent decoder layer's <code>to('meta')</code> eviction would destroy the child table; modeling code reads <code>weight.device</code></td><td><code>MmapEmbedding</code> — table kept as a plain attribute (not Parameter/buffer, invisible to <code>.to()</code>), zero-size <code>weight</code> on CPU keeps device introspection working</td><td class="mono">utils.py:309</td></tr>
+  </table>
+  <p>The splitter also peels n-gram tensors out of their parent decoder layer's shard via the <code>cpu_resident_marker</code> path map (airllm_qwen4_exp.py:61), and merging the original <code>shard_N</code> pieces never holds two full copies — one shard at a time into a preallocated destination (utils.py:158).</p>
+</section>
+
+<!-- ============ QUANT ============ -->
+<section id="quant">
+  <h2><span class="idx">6</span>Quantization: two distinct paths</h2>
+  <h3>6.1 Self-compression (bnb) — for I/O speed, not VRAM</h3>
+  <p>Since the bottleneck is disk loading, AirLLM quantizes <b>weights only</b> at split time — NF4 (blocksize 64) or int8 (blocksize 2048) via bitsandbytes — shrinking bytes-to-load ~4×/2× for up to 3× faster inference with negligible loss (utils.py:470-489). Activations stay high-precision, which is why accuracy holds. Quant-state is serialized alongside (including a local re-implementation of bnb's broken <code>as_dict</code>, utils.py:43) and reconstructed per-layer at load through <code>AutoHfQuantizer.create_quantized_param</code> (airllm_base.py:611-615).</p>
+  <h3>6.2 Pre-quantized checkpoints (FP8 / MXFP4) — load packed, decompress on GPU</h3>
+  <ul class="b">
+    <li><b>Verbatim placement:</b> anything not a plain high-precision float — fp8 weights, packed 4-bit ints, scales, g-idx — is moved to device <i>without dtype cast</i>; casting would silently destroy the quantization (airllm_base.py:633-648, <code>_should_load_verbatim</code>).</li>
+    <li><b>PCIe-optimized decompression:</b> MXFP4 payloads are transferred still-packed, then expanded <i>on the GPU</i> — 4× less PCIe traffic than transferring expanded weights (airllm_base.py:489-543).</li>
+    <li><b>Hook surgery:</b> compressed-tensors normally registers a whole-model decompress-on-first-forward hook, which would re-expand every packed module (a K3 layer → ~56GB) and defeat per-expert streaming; AirLLM removes it and decompresses per-module itself (airllm_base.py:355-361). Mixed-layout checkpoints where "quantized" modules actually ship bf16 get their plain <code>weight</code> Parameter restored (airllm_base.py:459).</li>
+  </ul>
+</section>
+
+<!-- ============ TRAIN ============ -->
+<section id="train">
+  <h2><span class="idx">7</span>Training huge models on tiny GPUs: streamed LoRA</h2>
+  <p class="lead">airllm_lora.py — HF Trainer/PEFT keep the whole autograd graph (or all 4-bit weights) resident; AirLLM instead applies gradient-checkpointing thinking to <i>weight streaming</i>.</p>
+  <h3>7.1 Custom autograd Function with disk recompute</h3>
+  <p><code>_StreamedModule</code> (airllm_lora.py:35): forward runs the streamed module under <code>no_grad</code> and returns CPU-detached output; backward <i>re-materializes the layer from disk</i> and runs a real forward with grad to backprop into the LoRA adapters, returning <code>d_hidden</code> to CPU. Hidden states are CPU tensors between layers, so a 64-layer graph never pins 64 hidden states in VRAM. Eviction + prefetch of the <i>previous</i> layer are scheduled inside backward (reverse order) — the pipeline is direction-symmetric.</p>
+  <h3>7.2 LoRA without PEFT</h3>
+  <p><code>LoRALinear</code> (lora_linear.py:41) wraps and keeps the <i>original</i> <code>weight</code> Parameter object, so AirLLM's shard loader (<code>&lt;module&gt;.weight</code> keys) still works while the base tensor swaps disk↔meta; only <code>lora_A/B</code> (+ their AdamW state) stay resident on GPU. PEFT is explicitly rejected because it materializes full base weights. <code>LoRAPackedExperts</code> (lora_linear.py:98) extends this to Qwen4Exp's 3D packed expert tensors — matmuls only on routed experts' rows. Defaults are VRAM-aware: packed-expert LoRA is off by default (48 layers × 512 experts × r16 ≈ 5.5GB adapters + 22GB fp32 Adam), and MoE runs <code>eager</code> experts to avoid grouped-mm's autograd allocating full-size frozen dW (airllm_lora.py:445-451).</p>
+  <h3>7.3 Chunked cross-entropy</h3>
+  <p>Qwen3.8's lm_head is 248320×5120 (2.54GB bf16); naive logits at seq 2048 add ~2GB fp32. <code>chunked_linear_cross_entropy</code> (chunked_ce.py:19) walks the vocabulary in chunks with a running <code>logaddexp</code> log-sum-exp, never materializing <code>[N, vocab]</code>, and recomputes the same chunks in backward for <code>d_hidden</code>. Both <code>hidden</code> and <code>weight</code> may live on CPU — rows of embed/lm_head are gathered from host RAM (cpu_resident in airllm_lora.py:85).</p>
+  <div class="panel good"><div class="tag">Result</div><p style="margin-top:6px">125B MoE trains under 6GB (RTX 3060 Ti-class); 27B dense in ~2GB at seq 512. Peak VRAM = one streamed layer + adapters + optimizer.</p></div>
+</section>
+
+<!-- ============ ROBUST ============ -->
+<section id="robust">
+  <h2><span class="idx">8</span>Compatibility engineering (the hidden 40%)</h2>
+  <p class="lead">Much of the codebase is deliberate armor against upstream drift — instructive for anyone maintaining HF-adjacent infra.</p>
+  <table>
+    <tr><th>Friction</th><th>Countermeasure</th><th>Where</th></tr>
+    <tr><td>transformers 5.0 moved symbols remote code still imports</td><td>Re-export shim restoring old import paths</td><td class="mono">base:35-55</td></tr>
+    <tr><td>transformers ≥4.50 dropped <code>GenerationMixin</code> from older/remote model classes</td><td>Dynamic subclass mixes it back in; also pins <code>.device/.dtype</code> to CUDA so generation utilities place tensors correctly while params sit on meta</td><td class="mono">base:379-402</td></tr>
+    <tr><td>fp16 overflows → inf/NaN on deep models (Qwen3-235B, 94 layers)</td><td>Default dtype = checkpoint's own <code>torch_dtype</code> (usually bf16); never force fp16</td><td class="mono">base:166-179</td></tr>
+    <tr><td>Model class builds param shapes the checkpoint disagrees with (K3 <code>A_log</code>)</td><td><code>_adopt_checkpoint_shape</code>: for never-materialized (meta) params, checkpoint is source of truth</td><td class="mono">base:568</td></tr>
+    <tr><td>Attention impl: sdpa unsupported by some remote code; nested multimodal sub-configs ignore the attn choice</td><td>sdpa→eager fallback with explicit re-request (transformers re-selects sdpa otherwise); recursive <code>_attn_implementation</code> propagation into sub-configs</td><td class="mono">base:231-344</td></tr>
+    <tr><td>Qwen4Exp indexer scatters int32 indices; torch wants int64</td><td>Scoped <code>Tensor.scatter</code> wrapper patched onto that forward only</td><td class="mono">utils:354</td></tr>
+    <tr><td>Quantizer API renamed across versions</td><td>Duck-typed <code>param_needs_quantization</code>/<code>check_quantized_param</code></td><td class="mono">base:650</td></tr>
+    <tr><td>bnb companion tensors named <code>&lt;w&gt;.4bit.*</code></td><td>Collapse to base weight name; reconstruct via quantizer</td><td class="mono">base:657</td></tr>
+  </table>
+</section>
+
+<!-- ============ MACOS ============ -->
+<section id="macos">
+  <h2><span class="idx">9</span>MacOS / MLX backend</h2>
+  <p>A parallel path for Apple Silicon: <code>AutoModel</code> routes to <code>AirLLMLlamaMlx</code> on darwin (auto_model.py:57), a compact from-scratch Llama implementation in <code>mlx</code> that reuses the same split shards through an <code>MlxModelPersister</code> (.npz variant). Same lifecycle discipline — load layer, compute, free — via explicit <code>mx.eval</code>/gc management rather than hooks. Trade-off: Llama-family only, and separate model code to maintain.</p>
+</section>
+
+<!-- ============ DESIGN ============ -->
+<section id="design">
+  <h2><span class="idx">10</span>Design principles worth stealing</h2>
+  <ul class="b">
+    <li><b>Own logistics, not math.</b> By hooking module boundaries on a meta-device model, AirLLM outsources all architecture-specific computation to transformers. Per-model cost ≈ one dict of module paths. This is why "most new models work the day they're released."</li>
+    <li><b>Disk is a memory tier.</b> The split format is designed for <i>random access</i> (one file per module; per-tensor seek within files), making "load exactly what runs" cheap — the enabler for per-expert streaming and mmap gathers.</li>
+    <li><b>Skip work that's already done.</b> Passthrough hard-linking when shards already match the target layout; <code>.done</code> markers for resume; on-demand shard download; delete-as-you-go for originals.</li>
+    <li><b>Quantize for bytes, not compute.</b> Recognizing the bottleneck is I/O lets weight-only compression deliver speed without activation-quantization accuracy pain.</li>
+    <li><b>Checkpointing generalizes.</b> The training path is gradient checkpointing taken to its logical extreme — recompute = re-load from disk; intermediates live on CPU; the fused-CE avoids the other classic blowup ([N,vocab] logits).</li>
+    <li><b>Budget scarce resources explicitly.</b> Pinned-memory 2GB cap, verbatim-vs-cast load policy, per-hook release lists instead of blanket <code>.to(meta)</code>.</li>
+  </ul>
+</section>
+
+<!-- ============ RISKS ============ -->
+<section id="risks">
+  <h2><span class="idx">11</span>Trade-offs &amp; risks</h2>
+  <div class="panel warn"><div class="tag">Throughput</div><p style="margin-top:6px">Layer loads dominate; decode is roughly disk-bandwidth ÷ bytes-per-layer (tokens/sec, not tens). AirLLM optimizes <i>feasibility</i> (biggest model on smallest card), not serving latency. Prefetch + compression only partially mitigate.</p></div>
+  <div class="panel warn"><div class="tag">First-run cost</div><p style="margin-top:6px">The split pass needs ~1× checkpoint size in free disk (unless passthrough applies) and hours for T-scale models; huge host RAM is assumed for some paths (K3 experts, Flash-Next needs ≥64GB machine for the mmap'd table).</p></div>
+  <div class="panel bad"><div class="tag">Global mutable state</div><p style="margin-top:6px"><code>ModelPersister</code> singleton (persist/model_persister.py:4), class-attribute stashing in <code>_StreamedModule</code> (airllm_lora.py:43) and <code>_ChunkedCE</code>, plus monkeypatches of <code>nn.Embedding.__init__</code>/<code>Tensor.scatter</code> — all process-global and not thread-safe. Acceptable for a CLI/library-of-one-model-per-process, but a hazard for embedding AirLLM inside a server.</p></div>
+  <div class="panel warn"><div class="tag">Maintenance surface</div><p style="margin-top:6px">The compatibility shims (§8) are tied to exact upstream behavior and will need chasing every transformers release; two backends (CUDA-hooks + MLX) and the aux training lab (anima_100k/rlhf, pinned to 2023-era deps in requirements.txt) drift independently of the packaged core.</p></div>
+  <div class="panel warn"><div class="tag">Coverage notes</div><p style="margin-top:6px">Packed-tensor MoE (Qwen4Exp) streams whole layers, not experts; MLX path is Llama-only; prefetch disabled under bnb compression; one repo bug spotted on read: <code>remove_real_and_linked_file</code> can reference an unassigned <code>targetpath</code> (utils.py:491-497) when the path is not a link.</p></div>
+</section>
+
+</main>
+<footer>Generated from static analysis of lyogavin/airllm @ 7bb8a86 · file:line refs point into air_llm/airllm/ · airllm_analysis_report.html</footer>
+</div>
+</body>
+</html>
